@@ -12,7 +12,7 @@ topics:
   - native-widgets
 
 environment:
-  sdk: ^3.9.0
+  sdk: ^3.6.0
   flutter: '>=3.3.0'
 
 dependencies:
