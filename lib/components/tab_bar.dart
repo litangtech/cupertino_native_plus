@@ -643,10 +643,17 @@ class _CNTabBarState extends State<CNTabBar> {
     Map<String, dynamic> creationParams,
   ) {
     const viewType = ViewTypes.cupertinoNativeTabBar;
-    // Stable key so Flutter reuses the platform view and avoids jank on rebuilds.
+    // Keep the platform view stable for ordinary rebuilds, but recreate it when
+    // native structure changes so removed items/actions do not remain mounted.
     final platformView = buildCupertinoPlatformView(
       context,
-      key: const ValueKey<String>('CupertinoNativeTabBar'),
+      key: ValueKey<String>(
+        'CupertinoNativeTabBar_'
+        '${widget.items.length}_'
+        '${widget.centerAction != null}_'
+        '${widget.split}_'
+        '${widget.searchItem != null}',
+      ),
       viewType: viewType,
       creationParams: creationParams,
       onPlatformViewCreated: _onCreated,
