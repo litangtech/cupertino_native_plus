@@ -70,6 +70,42 @@ class CNTabBarItem extends Equatable {
   List<Object?> get props => [label, icon, activeIcon, badge, badgeColor];
 }
 
+/// Configuration for a non-selectable action displayed in the center of a
+/// native tab bar.
+///
+/// The action does not participate in [CNTabBar.currentIndex]. On iOS 26+ it
+/// is rendered as a native prominent Liquid Glass button between the left and
+/// right tab groups.
+class CNTabBarCenterAction extends Equatable {
+  /// Creates a centered non-selectable tab bar action.
+  const CNTabBarCenterAction({
+    this.icon = const CNIcon.symbol('plus'),
+    this.tint,
+    this.size = 44,
+    this.verticalOffset = 0,
+    this.accessibilityLabel,
+  });
+
+  /// Icon rendered in the center action.
+  final CNIcon icon;
+
+  /// Prominent Liquid Glass tint.
+  final Color? tint;
+
+  /// Width and height of the action button.
+  final double size;
+
+  /// Vertical offset from the native tab bar's safe-area center.
+  final double verticalOffset;
+
+  /// Native accessibility label announced for the action.
+  final String? accessibilityLabel;
+
+  @override
+  List<Object?> get props =>
+      [icon, tint, size, verticalOffset, accessibilityLabel];
+}
+
 /// A Cupertino-native tab bar. Uses native UITabBar/NSTabView style visuals.
 ///
 /// On iOS 26+, supports a dedicated search tab that follows Apple's native
@@ -112,20 +148,27 @@ class CNTabBar extends StatefulWidget {
     this.splitSpacing =
         12.0, // Apple's recommended spacing for visual separation
     this.splitRightAsButton = false,
+    this.centerAction,
+    this.onCenterActionTap,
+    this.onCenterActionLongPress,
     this.searchItem,
     this.searchController,
     this.labelStyle,
     this.activeLabelStyle,
-  }) : assert(items.length >= 2, 'Tab bar must have at least 2 items'),
-       assert(
-         items.length <= 5,
-         'Tab bar should have 5 or fewer items for optimal usability',
-       ),
-       assert(rightCount >= 1, 'Right count must be at least 1'),
-       assert(
-         rightCount < items.length || searchItem != null,
-         'Right count must be less than total items',
-       );
+  })  : assert(items.length >= 2, 'Tab bar must have at least 2 items'),
+        assert(
+          items.length <= 5,
+          'Tab bar should have 5 or fewer items for optimal usability',
+        ),
+        assert(rightCount >= 1, 'Right count must be at least 1'),
+        assert(
+          rightCount < items.length || searchItem != null,
+          'Right count must be less than total items',
+        ),
+        assert(
+          centerAction == null || items.length % 2 == 0,
+          'Center action requires an even number of tab items',
+        );
 
   /// Items to display in the tab bar.
   final List<CNTabBarItem> items;
@@ -179,6 +222,18 @@ class CNTabBar extends StatefulWidget {
   /// does not change the visual selection — selection is controlled solely
   /// by [currentIndex].
   final bool splitRightAsButton;
+
+  /// Optional native action displayed between two balanced tab groups.
+  ///
+  /// The action is independent from tab selection and requires an even number
+  /// of [items].
+  final CNTabBarCenterAction? centerAction;
+
+  /// Called when the native center action is tapped.
+  final VoidCallback? onCenterActionTap;
+
+  /// Called when the native center action is long-pressed.
+  final VoidCallback? onCenterActionLongPress;
 
   /// Optional search tab configuration.
   ///
@@ -302,6 +357,7 @@ class _CNTabBarState extends State<CNTabBar> {
     if (widget.splitSpacing != oldWidget.splitSpacing) return true;
     if (widget.iconSize != oldWidget.iconSize) return true;
     if (widget.height != oldWidget.height) return true;
+    if (widget.centerAction != oldWidget.centerAction) return true;
     return false;
   }
 
@@ -353,11 +409,9 @@ class _CNTabBarState extends State<CNTabBar> {
   @override
   Widget build(BuildContext context) {
     // Check if we should use native platform view
-    final isIOSOrMacOS =
-        defaultTargetPlatform == TargetPlatform.iOS ||
+    final isIOSOrMacOS = defaultTargetPlatform == TargetPlatform.iOS ||
         defaultTargetPlatform == TargetPlatform.macOS;
-    final shouldUseNative =
-        isIOSOrMacOS &&
+    final shouldUseNative = isIOSOrMacOS &&
         PlatformVersion.shouldUseNativeGlass &&
         PlatformViewGuard.isReady;
 
@@ -394,9 +448,10 @@ class _CNTabBarState extends State<CNTabBar> {
       widget.activeLabelStyle,
       context,
     );
-    final capturedSearchStyle = _hasSearch
-        ? _buildSearchStyleParams(context)
-        : null;
+    final centerAction = widget.centerAction;
+    final centerActionIcon = centerAction?.icon.toMap();
+    final capturedSearchStyle =
+        _hasSearch ? _buildSearchStyleParams(context) : null;
 
     final labels = widget.items.map((e) => e.label ?? '').toList();
     final badges = widget.items.map((e) => e.badge).toList();
@@ -434,23 +489,19 @@ class _CNTabBarState extends State<CNTabBar> {
 
     if (!mounted) return null;
 
-    final sizes = widget.items
-        .map((e) => widget.iconSize ?? e.icon?.size.width)
-        .toList();
+    final sizes =
+        widget.items.map((e) => widget.iconSize ?? e.icon?.size.width).toList();
     final colors = widget.items
         .map((e) => resolveColorToArgb(e.icon?.color, context))
         .toList();
 
     final imageAssetData = widget.items.map((e) => e.icon?.imageData).toList();
-    final activeImageAssetData = widget.items
-        .map((e) => e.activeIcon?.imageData)
-        .toList();
-    final imageAssetXcassetNames = widget.items
-        .map((e) => e.icon?.xcassetName ?? '')
-        .toList();
-    final activeImageAssetXcassetNames = widget.items
-        .map((e) => e.activeIcon?.xcassetName ?? '')
-        .toList();
+    final activeImageAssetData =
+        widget.items.map((e) => e.activeIcon?.imageData).toList();
+    final imageAssetXcassetNames =
+        widget.items.map((e) => e.icon?.xcassetName ?? '').toList();
+    final activeImageAssetXcassetNames =
+        widget.items.map((e) => e.activeIcon?.xcassetName ?? '').toList();
 
     // Auto-detect format from resolved path or magic bytes
     final imageAssetFormats = await Future.wait(
@@ -499,6 +550,18 @@ class _CNTabBarState extends State<CNTabBar> {
       'rightCount': widget.rightCount,
       'splitSpacing': widget.splitSpacing,
       'splitRightAsButton': widget.splitRightAsButton,
+      if (centerAction != null) ...{
+        'hasCenterAction': true,
+        'centerActionSymbol':
+            centerActionIcon?['iconName'] as String? ?? 'plus',
+        'centerActionSize': centerAction.size,
+        'centerActionVerticalOffset': centerAction.verticalOffset,
+        'centerActionIconSize': centerAction.icon.size.width > 0
+            ? centerAction.icon.size.width
+            : 24,
+        'centerActionTint': resolveColorToArgb(centerAction.tint, context),
+        'centerActionAccessibilityLabel': centerAction.accessibilityLabel ?? '',
+      },
       'style': capturedStyle
         ..addAll({
           if (capturedBackgroundColor != null)
@@ -509,8 +572,7 @@ class _CNTabBarState extends State<CNTabBar> {
         'searchPlaceholder': widget.searchItem!.placeholder,
         'searchLabel': widget.searchItem!.label,
         'searchSymbol': widget.searchItem!.icon?.name ?? 'magnifyingglass',
-        'searchActiveSymbol':
-            widget.searchItem!.activeIcon?.name ??
+        'searchActiveSymbol': widget.searchItem!.activeIcon?.name ??
             widget.searchItem!.icon?.name ??
             'magnifyingglass',
         'automaticallyActivatesSearch':
@@ -581,10 +643,17 @@ class _CNTabBarState extends State<CNTabBar> {
     Map<String, dynamic> creationParams,
   ) {
     const viewType = ViewTypes.cupertinoNativeTabBar;
-    // Stable key so Flutter reuses the platform view and avoids jank on rebuilds.
+    // Keep the platform view stable for ordinary rebuilds, but recreate it when
+    // native structure changes so removed items/actions do not remain mounted.
     final platformView = buildCupertinoPlatformView(
       context,
-      key: const ValueKey<String>('CupertinoNativeTabBar'),
+      key: ValueKey<String>(
+        'CupertinoNativeTabBar_'
+        '${widget.items.length}_'
+        '${widget.centerAction != null}_'
+        '${widget.split}_'
+        '${widget.searchItem != null}',
+      ),
       viewType: viewType,
       creationParams: creationParams,
       onPlatformViewCreated: _onCreated,
@@ -618,9 +687,8 @@ class _CNTabBarState extends State<CNTabBar> {
     _lastSplitRightAsButton = widget.splitRightAsButton;
     _lastLabelStyle = encodeTextStyle(widget.labelStyle, context);
     _lastActiveLabelStyle = encodeTextStyle(widget.activeLabelStyle, context);
-    ch
-        .invokeMethod('setSelectedIndex', {'index': widget.currentIndex})
-        .catchError((_) {});
+    ch.invokeMethod(
+        'setSelectedIndex', {'index': widget.currentIndex}).catchError((_) {});
   }
 
   Future<dynamic> _onMethodCall(MethodCall call) async {
@@ -642,6 +710,10 @@ class _CNTabBarState extends State<CNTabBar> {
           _lastIndex = idx;
         }
       }
+    } else if (call.method == 'centerActionTapped') {
+      widget.onCenterActionTap?.call();
+    } else if (call.method == 'centerActionLongPressed') {
+      widget.onCenterActionLongPress?.call();
     } else if (call.method == 'searchTextChanged') {
       final args = call.arguments as Map?;
       final text = args?['text'] as String? ?? '';
@@ -764,18 +836,14 @@ class _CNTabBarState extends State<CNTabBar> {
         );
         if (!mounted) return;
 
-        final imageAssetData = widget.items
-            .map((e) => e.icon?.imageData)
-            .toList();
-        final activeImageAssetData = widget.items
-            .map((e) => e.activeIcon?.imageData)
-            .toList();
-        final imageAssetXcassetNames = widget.items
-            .map((e) => e.icon?.xcassetName ?? '')
-            .toList();
-        final activeImageAssetXcassetNames = widget.items
-            .map((e) => e.activeIcon?.xcassetName ?? '')
-            .toList();
+        final imageAssetData =
+            widget.items.map((e) => e.icon?.imageData).toList();
+        final activeImageAssetData =
+            widget.items.map((e) => e.activeIcon?.imageData).toList();
+        final imageAssetXcassetNames =
+            widget.items.map((e) => e.icon?.xcassetName ?? '').toList();
+        final activeImageAssetXcassetNames =
+            widget.items.map((e) => e.activeIcon?.xcassetName ?? '').toList();
         final imageAssetFormats = widget.items
             .asMap()
             .entries
@@ -963,8 +1031,7 @@ class _CNTabBarState extends State<CNTabBar> {
     final buttonSize = style.buttonSize ?? 44.0;
     final iconSize = style.iconSize ?? 20.0;
     final spacing = style.spacing ?? 12.0;
-    final contentPadding =
-        style.contentPadding ??
+    final contentPadding = style.contentPadding ??
         const EdgeInsets.symmetric(horizontal: 16, vertical: 8);
 
     return Container(
@@ -1016,8 +1083,7 @@ class _CNTabBarState extends State<CNTabBar> {
     double iconSize,
     CNTabBarSearchStyle style,
   ) {
-    final collapsedIcon =
-        style.collapsedTabIcon?.name ??
+    final collapsedIcon = style.collapsedTabIcon?.name ??
         widget.items.first.icon?.toMap()['iconName'] as String? ??
         'square.grid.2x2';
 
@@ -1082,20 +1148,19 @@ class _CNTabBarState extends State<CNTabBar> {
                       const SizedBox(width: 4),
                       Text(
                         widget.items[i].label!,
-                        style:
-                            TextStyle(
-                              fontSize: 12,
-                              fontWeight: widget.currentIndex == i
-                                  ? FontWeight.w600
-                                  : FontWeight.normal,
-                              color: widget.currentIndex == i
-                                  ? tintColor
-                                  : CupertinoColors.inactiveGray,
-                            ).merge(
-                              widget.currentIndex == i
-                                  ? widget.activeLabelStyle
-                                  : widget.labelStyle,
-                            ),
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: widget.currentIndex == i
+                              ? FontWeight.w600
+                              : FontWeight.normal,
+                          color: widget.currentIndex == i
+                              ? tintColor
+                              : CupertinoColors.inactiveGray,
+                        ).merge(
+                          widget.currentIndex == i
+                              ? widget.activeLabelStyle
+                              : widget.labelStyle,
+                        ),
                       ),
                     ],
                   ],
@@ -1152,16 +1217,14 @@ class _CNTabBarState extends State<CNTabBar> {
     CNTabBarSearchStyle style,
   ) {
     final searchSymbol = widget.searchItem?.icon?.name ?? 'magnifyingglass';
-    final padding =
-        style.searchBarPadding ??
+    final padding = style.searchBarPadding ??
         const EdgeInsets.symmetric(horizontal: 12, vertical: 8);
 
     return Expanded(
       child: Container(
         height: style.searchBarHeight ?? 36,
         decoration: BoxDecoration(
-          color:
-              style.searchBarBackgroundColor ??
+          color: style.searchBarBackgroundColor ??
               CupertinoColors.systemGrey6.resolveFrom(context),
           borderRadius: BorderRadius.circular(
             style.searchBarBorderRadius ?? (style.searchBarHeight ?? 36) / 2,
@@ -1173,8 +1236,7 @@ class _CNTabBarState extends State<CNTabBar> {
             CNIconView(
               symbol: CNSymbol(searchSymbol),
               size: (style.iconSize ?? 20) * 0.8,
-              color:
-                  style.searchBarPlaceholderColor ??
+              color: style.searchBarPlaceholderColor ??
                   CupertinoColors.secondaryLabel,
             ),
             const SizedBox(width: 8),
@@ -1184,8 +1246,7 @@ class _CNTabBarState extends State<CNTabBar> {
                 autofocus: false, // Never auto-focus - we control this manually
                 placeholder: widget.searchItem?.placeholder ?? 'Search',
                 placeholderStyle: TextStyle(
-                  color:
-                      style.searchBarPlaceholderColor ??
+                  color: style.searchBarPlaceholderColor ??
                       CupertinoColors.secondaryLabel,
                 ),
                 style: TextStyle(

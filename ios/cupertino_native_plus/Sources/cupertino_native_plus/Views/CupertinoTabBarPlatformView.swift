@@ -22,12 +22,13 @@ final class CupertinoTabBarContainerView: UIView {
   }
 }
 
-class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelegate {
+class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelegate, UIGestureRecognizerDelegate {
   private let channel: FlutterMethodChannel
   private let container: CupertinoTabBarContainerView
   private var tabBar: UITabBar?
   private var tabBarLeft: UITabBar?
   private var tabBarRight: UITabBar?
+  private var centerActionButton: UIButton?
   
   // MARK: - State Properties
   private var isSplit: Bool = false
@@ -63,6 +64,8 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
   private var hasScheduledNonZeroBoundsRefresh: Bool = false
   private var isRefreshingLabels: Bool = false
   private var needsLabelRefresh: Bool = false
+  private var centerActionIndex: Int?
+  private var centerActionSize: CGFloat = 44
 
   // Pending split-constraint activation deferred while view has no width
   // (e.g. backgrounded at init). Resumed on foreground.
@@ -206,7 +209,11 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
     guard count > 0 else { return }
     guard bar.bounds.width > 0 else { return }
     for localIndex in 0..<count {
-      let globalIndex = itemOffset + localIndex
+      let nativeIndex = itemOffset + localIndex
+      guard let globalIndex = logicalIndex(forNativeIndex: nativeIndex) else {
+        bar.items?[localIndex].badgeValue = nil
+        continue
+      }
       let tag = Self.badgeViewTagBase + globalIndex
       let existing = bar.viewWithTag(tag)
       let badge = (globalIndex < currentBadges.count) ? currentBadges[globalIndex] : nil
@@ -399,14 +406,35 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
     suppressSelectionCallbacks = false
   }
 
+  private func nativeIndex(forLogicalIndex index: Int) -> Int {
+    guard let centerActionIndex, index >= centerActionIndex else { return index }
+    return index + 1
+  }
+
+  private func logicalIndex(forNativeIndex index: Int) -> Int? {
+    guard let centerActionIndex else { return index }
+    if index == centerActionIndex { return nil }
+    return index > centerActionIndex ? index - 1 : index
+  }
+
+  private func insertingCenterActionItem(into items: [UITabBarItem]) -> [UITabBarItem] {
+    guard let centerActionIndex else { return items }
+    var result = items
+    let placeholder = UITabBarItem(title: nil, image: nil, selectedImage: nil)
+    placeholder.isEnabled = false
+    result.insert(placeholder, at: min(centerActionIndex, result.count))
+    return result
+  }
+
   private func restoreSelection(
     singleFallback: UITabBarItem? = nil,
     leftFallback: UITabBarItem? = nil,
     rightFallback: UITabBarItem? = nil
   ) {
     if let bar = tabBar, let items = bar.items {
-      if currentSelectedIndex >= 0, currentSelectedIndex < items.count {
-        bar.selectedItem = items[currentSelectedIndex]
+      let nativeIndex = nativeIndex(forLogicalIndex: currentSelectedIndex)
+      if nativeIndex >= 0, nativeIndex < items.count {
+        bar.selectedItem = items[nativeIndex]
       } else {
         bar.selectedItem = singleFallback
       }
@@ -595,6 +623,12 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
     var rightCount: Int = 1
     var leftInset: CGFloat = 0
     var rightInset: CGFloat = 0
+    var hasCenterAction: Bool = false
+    var centerActionSymbol: String = "plus"
+    var centerActionIconSize: CGFloat = 24
+    var centerActionVerticalOffset: CGFloat = 0
+    var centerActionTint: UIColor? = nil
+    var centerActionAccessibilityLabel: String? = nil
 
     var badgeColors: [NSNumber?] = []
     if let dict = args as? [String: Any] {
@@ -636,6 +670,17 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
       if let rc = dict["rightCount"] as? NSNumber { rightCount = rc.intValue }
       if let sp = dict["splitSpacing"] as? NSNumber { splitSpacingVal = CGFloat(truncating: sp) }
       if let rb = dict["splitRightAsButton"] as? NSNumber { self.splitRightAsButton = rb.boolValue }
+      if let value = dict["hasCenterAction"] as? NSNumber { hasCenterAction = value.boolValue }
+      if let value = dict["centerActionSymbol"] as? String, !value.isEmpty { centerActionSymbol = value }
+      if let value = dict["centerActionSize"] as? NSNumber { centerActionSize = CGFloat(truncating: value) }
+      if let value = dict["centerActionIconSize"] as? NSNumber { centerActionIconSize = CGFloat(truncating: value) }
+      if let value = dict["centerActionVerticalOffset"] as? NSNumber {
+        centerActionVerticalOffset = CGFloat(truncating: value)
+      }
+      if let value = dict["centerActionTint"] as? NSNumber { centerActionTint = ImageUtils.colorFromARGB(value.intValue) }
+      if let value = dict["centerActionAccessibilityLabel"] as? String, !value.isEmpty {
+        centerActionAccessibilityLabel = value
+      }
       if let ls = dict["labelStyle"] as? [String: Any] { self.labelStyleDict = ls }
       if let als = dict["activeLabelStyle"] as? [String: Any] { self.activeLabelStyleDict = als }
       // content insets controlled by Flutter padding; keep zero here
@@ -650,6 +695,7 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
 
     super.init()
 
+    self.centerActionIndex = hasCenterAction ? max(labels.count, symbols.count) / 2 : nil
     container.backgroundColor = .clear
     container.onDidMoveToWindow = { [weak self] in
       guard let self = self else { return }
@@ -846,8 +892,11 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
       if let bg = bg { bar.barTintColor = bg }
       if #available(iOS 10.0, *), let tint = tint { bar.tintColor = tint }
       if let ap = appearance { if #available(iOS 13.0, *) { bar.standardAppearance = ap; if #available(iOS 15.0, *) { bar.scrollEdgeAppearance = ap } } }
-      bar.items = buildItems(0..<count)
-      if selectedIndex >= 0, let items = bar.items, selectedIndex < items.count { bar.selectedItem = items[selectedIndex] }
+      bar.items = insertingCenterActionItem(into: buildItems(0..<count))
+      let nativeSelectedIndex = nativeIndex(forLogicalIndex: selectedIndex)
+      if nativeSelectedIndex >= 0, let items = bar.items, nativeSelectedIndex < items.count {
+        bar.selectedItem = items[nativeSelectedIndex]
+      }
       container.addSubview(bar)
       NSLayoutConstraint.activate([
         bar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -855,6 +904,57 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
         bar.topAnchor.constraint(equalTo: container.topAnchor),
         bar.bottomAnchor.constraint(equalTo: container.bottomAnchor),
       ])
+      if hasCenterAction {
+        let selectionRestoreGesture = UILongPressGestureRecognizer(
+          target: self,
+          action: #selector(onTabBarTouchTracking(_:))
+        )
+        selectionRestoreGesture.minimumPressDuration = 0
+        selectionRestoreGesture.cancelsTouchesInView = false
+        selectionRestoreGesture.delaysTouchesBegan = false
+        selectionRestoreGesture.delegate = self
+        bar.addGestureRecognizer(selectionRestoreGesture)
+
+        let button = UIButton(type: .system)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.accessibilityLabel = centerActionAccessibilityLabel
+        button.accessibilityTraits = .button
+        button.addTarget(self, action: #selector(onCenterActionTapped), for: .touchUpInside)
+        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(onCenterActionLongPressed(_:)))
+        button.addGestureRecognizer(longPress)
+
+        let symbolConfig = UIImage.SymbolConfiguration(
+          pointSize: centerActionIconSize,
+          weight: .semibold
+        )
+        let image = UIImage(systemName: centerActionSymbol, withConfiguration: symbolConfig)
+        if #available(iOS 26.0, *) {
+          var config = UIButton.Configuration.prominentGlass()
+          config.image = image
+          config.baseForegroundColor = .white
+          config.baseBackgroundColor = centerActionTint
+          config.cornerStyle = .capsule
+          button.configuration = config
+        } else {
+          button.setImage(image, for: .normal)
+          button.tintColor = .white
+          button.backgroundColor = centerActionTint ?? .systemBlue
+          button.layer.cornerRadius = centerActionSize / 2
+        }
+
+        centerActionButton = button
+        bar.addSubview(button)
+        NSLayoutConstraint.activate([
+          button.centerXAnchor.constraint(equalTo: bar.centerXAnchor),
+          button.centerYAnchor.constraint(
+            equalTo: bar.safeAreaLayoutGuide.centerYAnchor,
+            constant: centerActionVerticalOffset
+          ),
+          button.widthAnchor.constraint(equalToConstant: centerActionSize),
+          button.heightAnchor.constraint(equalToConstant: centerActionSize),
+        ])
+        bar.bringSubviewToFront(button)
+      }
       // Force layout update for background and text rendering on iOS < 16
       // Re-assign items after layout to ensure labels render properly
       DispatchQueue.main.async { [weak self, weak bar] in
@@ -866,6 +966,10 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
         // Re-assign items to force label rendering
         let items = bar.items
         bar.items = items
+        let nativeSelectedIndex = self.nativeIndex(forLogicalIndex: selectedIndex)
+        if let items = bar.items, nativeSelectedIndex >= 0, nativeSelectedIndex < items.count {
+          bar.selectedItem = items[nativeSelectedIndex]
+        }
         // Force another update cycle for text rendering
         DispatchQueue.main.async { [weak bar] in
           guard let bar = bar else { return }
@@ -1046,8 +1150,11 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
             self.scheduleBadgeLayout()
             self.scheduleLabelRefresh(resetBoundsTrigger: true)
           } else if let bar = self.tabBar {
-            bar.items = buildItems(0..<count)
-            if let items = bar.items, selectedIndex >= 0, selectedIndex < items.count { bar.selectedItem = items[selectedIndex] }
+            bar.items = self.insertingCenterActionItem(into: buildItems(0..<count))
+            let nativeSelectedIndex = self.nativeIndex(forLogicalIndex: selectedIndex)
+            if let items = bar.items, nativeSelectedIndex >= 0, nativeSelectedIndex < items.count {
+              bar.selectedItem = items[nativeSelectedIndex]
+            }
             result(nil)
             self.scheduleBadgeLayout()
             self.scheduleLabelRefresh(resetBoundsTrigger: true)
@@ -1234,8 +1341,11 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
             bar.clipsToBounds = false
             bar.layer.shadowOpacity = 0
             if let ap = appearance { if #available(iOS 13.0, *) { bar.standardAppearance = ap; if #available(iOS 15.0, *) { bar.scrollEdgeAppearance = ap } } }
-            bar.items = buildItems(0..<count)
-            if let items = bar.items, selectedIndex >= 0, selectedIndex < items.count { bar.selectedItem = items[selectedIndex] }
+            bar.items = self.insertingCenterActionItem(into: buildItems(0..<count))
+            let nativeSelectedIndex = self.nativeIndex(forLogicalIndex: selectedIndex)
+            if let items = bar.items, nativeSelectedIndex >= 0, nativeSelectedIndex < items.count {
+              bar.selectedItem = items[nativeSelectedIndex]
+            }
             self.container.addSubview(bar)
             NSLayoutConstraint.activate([
               bar.leadingAnchor.constraint(equalTo: self.container.leadingAnchor),
@@ -1257,7 +1367,12 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
               bar.items = items
               // Restore selection after re-assigning items (re-assignment can reset selection)
               if let saved = savedSelected { bar.selectedItem = saved }
-              else if let items = bar.items, selectedIndex >= 0, selectedIndex < items.count { bar.selectedItem = items[selectedIndex] }
+              else if let items = bar.items {
+                let nativeSelectedIndex = self.nativeIndex(forLogicalIndex: selectedIndex)
+                if nativeSelectedIndex >= 0, nativeSelectedIndex < items.count {
+                  bar.selectedItem = items[nativeSelectedIndex]
+                }
+              }
               // Force another update cycle for text rendering
               DispatchQueue.main.async { [weak bar] in
                 guard let bar = bar else { return }
@@ -1277,9 +1392,10 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
         if let args = call.arguments as? [String: Any], let idx = (args["index"] as? NSNumber)?.intValue {
           self.currentSelectedIndex = idx
           // Single bar
-          if let bar = self.tabBar, let items = bar.items, idx >= 0, idx < items.count {
+          let nativeIndex = self.nativeIndex(forLogicalIndex: idx)
+          if let bar = self.tabBar, let items = bar.items, nativeIndex >= 0, nativeIndex < items.count {
             withSuppressedSelectionCallbacks {
-              bar.selectedItem = items[idx]
+              bar.selectedItem = items[nativeIndex]
             }
             result(nil)
             return
@@ -1381,6 +1497,7 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
     tabBar?.delegate = nil
     tabBarLeft?.delegate = nil
     tabBarRight?.delegate = nil
+    centerActionButton?.removeFromSuperview()
     tabBar?.removeFromSuperview()
     tabBarLeft?.removeFromSuperview()
     tabBarRight?.removeFromSuperview()
@@ -1389,14 +1506,84 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
 
   func view() -> UIView { container }
 
+  @objc private func onCenterActionTapped() {
+    channel.invokeMethod("centerActionTapped", arguments: nil)
+  }
+
+  @objc private func onCenterActionLongPressed(_ recognizer: UILongPressGestureRecognizer) {
+    guard recognizer.state == .began else { return }
+    channel.invokeMethod("centerActionLongPressed", arguments: nil)
+  }
+
+  @objc private func onTabBarTouchTracking(_ recognizer: UILongPressGestureRecognizer) {
+    guard
+      let centerActionIndex,
+      let bar = tabBar,
+      let items = bar.items,
+      !items.isEmpty
+    else { return }
+    switch recognizer.state {
+    case .ended, .cancelled, .failed:
+      let location = recognizer.location(in: bar)
+      let slotWidth = bar.bounds.width / CGFloat(items.count)
+      let centerSlot = CGRect(
+        x: slotWidth * CGFloat(centerActionIndex),
+        y: 0,
+        width: slotWidth,
+        height: bar.bounds.height
+      )
+      if centerSlot.contains(location) {
+        forceRestoreCenterActionSelection()
+      }
+    default:
+      break
+    }
+  }
+
+  private func forceRestoreCenterActionSelection() {
+    guard
+      let bar = tabBar,
+      let items = bar.items
+    else { return }
+    let selectedIndex = nativeIndex(forLogicalIndex: currentSelectedIndex)
+    guard selectedIndex >= 0, selectedIndex < items.count else { return }
+
+    withSuppressedSelectionCallbacks {
+      bar.selectedItem = nil
+    }
+    DispatchQueue.main.async { [weak self, weak bar] in
+      guard let self, let bar, let items = bar.items, selectedIndex < items.count else { return }
+      self.withSuppressedSelectionCallbacks {
+        bar.selectedItem = items[selectedIndex]
+      }
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+      guard let self else { return }
+      self.withSuppressedSelectionCallbacks {
+        self.restoreSelection()
+      }
+    }
+  }
+
+  func gestureRecognizer(
+    _ gestureRecognizer: UIGestureRecognizer,
+    shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+  ) -> Bool {
+    return true
+  }
+
   func tabBar(_ tabBar: UITabBar, didSelect item: UITabBarItem) {
     if suppressSelectionCallbacks {
       return
     }
     // Single bar case
     if let single = self.tabBar, single === tabBar, let items = single.items, let idx = items.firstIndex(of: item) {
-      currentSelectedIndex = idx
-      channel.invokeMethod("valueChanged", arguments: ["index": idx])
+      guard let logicalIndex = logicalIndex(forNativeIndex: idx) else {
+        restoreSelection()
+        return
+      }
+      currentSelectedIndex = logicalIndex
+      channel.invokeMethod("valueChanged", arguments: ["index": logicalIndex])
       return
     }
     // Split left
