@@ -84,6 +84,7 @@ class CNTabBarCenterAction extends Equatable {
     this.size = 44,
     this.verticalOffset = 0,
     this.accessibilityLabel,
+    this.disablePressEffects = false,
   });
 
   /// Icon rendered in the center action.
@@ -101,9 +102,18 @@ class CNTabBarCenterAction extends Equatable {
   /// Native accessibility label announced for the action.
   final String? accessibilityLabel;
 
+  /// Whether to keep the button's scale and colors unchanged while pressed.
+  final bool disablePressEffects;
+
   @override
-  List<Object?> get props =>
-      [icon, tint, size, verticalOffset, accessibilityLabel];
+  List<Object?> get props => [
+        icon,
+        tint,
+        size,
+        verticalOffset,
+        accessibilityLabel,
+        disablePressEffects
+      ];
 }
 
 /// A Cupertino-native tab bar. Uses native UITabBar/NSTabView style visuals.
@@ -561,6 +571,7 @@ class _CNTabBarState extends State<CNTabBar> {
             : 24,
         'centerActionTint': resolveColorToArgb(centerAction.tint, context),
         'centerActionAccessibilityLabel': centerAction.accessibilityLabel ?? '',
+        'centerActionDisablePressEffects': centerAction.disablePressEffects,
       },
       'style': capturedStyle
         ..addAll({

@@ -1,5 +1,6 @@
 import Flutter
 import UIKit
+
 import SVGKit
 import os.log
 
@@ -29,6 +30,7 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
   private var tabBarLeft: UITabBar?
   private var tabBarRight: UITabBar?
   private var centerActionButton: UIButton?
+  private var centerActionInteractionButton: UIButton?
   
   // MARK: - State Properties
   private var isSplit: Bool = false
@@ -629,6 +631,7 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
     var centerActionVerticalOffset: CGFloat = 0
     var centerActionTint: UIColor? = nil
     var centerActionAccessibilityLabel: String? = nil
+    var centerActionDisablePressEffects = false
 
     var badgeColors: [NSNumber?] = []
     if let dict = args as? [String: Any] {
@@ -680,6 +683,9 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
       if let value = dict["centerActionTint"] as? NSNumber { centerActionTint = ImageUtils.colorFromARGB(value.intValue) }
       if let value = dict["centerActionAccessibilityLabel"] as? String, !value.isEmpty {
         centerActionAccessibilityLabel = value
+      }
+      if let value = dict["centerActionDisablePressEffects"] as? Bool {
+        centerActionDisablePressEffects = value
       }
       if let ls = dict["labelStyle"] as? [String: Any] { self.labelStyleDict = ls }
       if let als = dict["activeLabelStyle"] as? [String: Any] { self.activeLabelStyleDict = als }
@@ -919,9 +925,11 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
         button.translatesAutoresizingMaskIntoConstraints = false
         button.accessibilityLabel = centerActionAccessibilityLabel
         button.accessibilityTraits = .button
-        button.addTarget(self, action: #selector(onCenterActionTapped), for: .touchUpInside)
-        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(onCenterActionLongPressed(_:)))
-        button.addGestureRecognizer(longPress)
+        if !centerActionDisablePressEffects {
+          button.addTarget(self, action: #selector(onCenterActionTapped), for: .touchUpInside)
+          let longPress = UILongPressGestureRecognizer(target: self, action: #selector(onCenterActionLongPressed(_:)))
+          button.addGestureRecognizer(longPress)
+        }
 
         let symbolConfig = UIImage.SymbolConfiguration(
           pointSize: centerActionIconSize,
@@ -954,6 +962,32 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
           button.heightAnchor.constraint(equalToConstant: centerActionSize),
         ])
         bar.bringSubviewToFront(button)
+
+        if centerActionDisablePressEffects {
+          button.isUserInteractionEnabled = false
+
+          let interactionButton = UIButton(type: .custom)
+          interactionButton.translatesAutoresizingMaskIntoConstraints = false
+          interactionButton.backgroundColor = .clear
+          interactionButton.accessibilityLabel = centerActionAccessibilityLabel
+          interactionButton.accessibilityTraits = .button
+          interactionButton.addTarget(self, action: #selector(onCenterActionTapped), for: .touchUpInside)
+          let longPress = UILongPressGestureRecognizer(
+            target: self,
+            action: #selector(onCenterActionLongPressed(_:))
+          )
+          interactionButton.addGestureRecognizer(longPress)
+
+          centerActionInteractionButton = interactionButton
+          bar.addSubview(interactionButton)
+          NSLayoutConstraint.activate([
+            interactionButton.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+            interactionButton.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+            interactionButton.widthAnchor.constraint(equalTo: button.widthAnchor),
+            interactionButton.heightAnchor.constraint(equalTo: button.heightAnchor),
+          ])
+          bar.bringSubviewToFront(interactionButton)
+        }
       }
       // Force layout update for background and text rendering on iOS < 16
       // Re-assign items after layout to ensure labels render properly
@@ -1498,6 +1532,7 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
     tabBarLeft?.delegate = nil
     tabBarRight?.delegate = nil
     centerActionButton?.removeFromSuperview()
+    centerActionInteractionButton?.removeFromSuperview()
     tabBar?.removeFromSuperview()
     tabBarLeft?.removeFromSuperview()
     tabBarRight?.removeFromSuperview()
@@ -1570,6 +1605,17 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
     shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
   ) -> Bool {
     return true
+  }
+
+  func gestureRecognizer(
+    _ gestureRecognizer: UIGestureRecognizer,
+    shouldReceive touch: UITouch
+  ) -> Bool {
+    guard
+      let interactionButton = centerActionInteractionButton,
+      let touchedView = touch.view
+    else { return true }
+    return !touchedView.isDescendant(of: interactionButton)
   }
 
   func tabBar(_ tabBar: UITabBar, didSelect item: UITabBarItem) {
