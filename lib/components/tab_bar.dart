@@ -360,7 +360,9 @@ class _CNTabBarState extends State<CNTabBar> {
   /// True when items or config that affect native creation params have changed.
   bool _shouldRecreateNativeTabBar(CNTabBar oldWidget) {
     if (widget.items.length != oldWidget.items.length) return true;
-    if (widget.items != oldWidget.items) return true;
+    // Parents commonly create a new List on every build. List identity does
+    // not represent a native structure change; item value changes with the
+    // same length are synchronized through setItems below.
     if (widget.searchItem != oldWidget.searchItem) return true;
     if (widget.split != oldWidget.split) return true;
     if (widget.rightCount != oldWidget.rightCount) return true;
