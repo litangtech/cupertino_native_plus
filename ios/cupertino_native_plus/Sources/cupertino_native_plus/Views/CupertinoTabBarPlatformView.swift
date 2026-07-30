@@ -23,6 +23,37 @@ final class CupertinoTabBarContainerView: UIView {
   }
 }
 
+/// Keeps the center action above UIKit's private tab item views. `UITabBar` may
+/// rebuild those views after assigning `items` or during a later layout pass.
+/// Without restoring the z-order, the placeholder item can consume the touch
+/// before the center action receives it.
+private final class CupertinoCenterActionTabBar: UITabBar {
+  weak var centerActionButton: UIView?
+  weak var centerActionInteractionButton: UIView?
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    bringCenterActionToFront()
+  }
+
+  override func didAddSubview(_ subview: UIView) {
+    super.didAddSubview(subview)
+    // UIKit can insert private tab item views outside our own layout cycle.
+    // Reassert the action order whenever that happens as well.
+    bringCenterActionToFront()
+  }
+
+  func bringCenterActionToFront() {
+    if let button = centerActionButton, button.superview === self {
+      bringSubviewToFront(button)
+    }
+    if let interactionButton = centerActionInteractionButton,
+       interactionButton.superview === self {
+      bringSubviewToFront(interactionButton)
+    }
+  }
+}
+
 class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelegate, UIGestureRecognizerDelegate {
   private let channel: FlutterMethodChannel
   private let container: CupertinoTabBarContainerView
@@ -889,7 +920,7 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
         }
       }
     } else {
-      let bar = UITabBar(frame: .zero)
+      let bar = CupertinoCenterActionTabBar(frame: .zero)
       tabBar = bar
       bar.delegate = self
       bar.translatesAutoresizingMaskIntoConstraints = false
@@ -951,6 +982,7 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
         }
 
         centerActionButton = button
+        bar.centerActionButton = button
         bar.addSubview(button)
         NSLayoutConstraint.activate([
           button.centerXAnchor.constraint(equalTo: bar.centerXAnchor),
@@ -979,12 +1011,16 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
           interactionButton.addGestureRecognizer(longPress)
 
           centerActionInteractionButton = interactionButton
+          bar.centerActionInteractionButton = interactionButton
           bar.addSubview(interactionButton)
           NSLayoutConstraint.activate([
             interactionButton.centerXAnchor.constraint(equalTo: button.centerXAnchor),
-            interactionButton.centerYAnchor.constraint(equalTo: button.centerYAnchor),
-            interactionButton.widthAnchor.constraint(equalTo: button.widthAnchor),
-            interactionButton.heightAnchor.constraint(equalTo: button.heightAnchor),
+            interactionButton.topAnchor.constraint(equalTo: bar.topAnchor),
+            interactionButton.bottomAnchor.constraint(equalTo: bar.bottomAnchor),
+            interactionButton.widthAnchor.constraint(
+              equalTo: bar.widthAnchor,
+              multiplier: 1 / CGFloat(max(bar.items?.count ?? 1, 1))
+            ),
           ])
           bar.bringSubviewToFront(interactionButton)
         }
@@ -997,19 +1033,27 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
         self.container.layoutIfNeeded()
         bar.setNeedsLayout()
         bar.layoutIfNeeded()
-        // Re-assign items to force label rendering
-        let items = bar.items
-        bar.items = items
+        // Re-assigning items is only needed for the legacy label rendering
+        // workaround. On modern iOS it rebuilds UIKit's private item views and
+        // can move the center-action hit target behind the placeholder item.
+        if #available(iOS 16.0, *) {
+          // No workaround needed.
+        } else {
+          let items = bar.items
+          bar.items = items
+        }
         let nativeSelectedIndex = self.nativeIndex(forLogicalIndex: selectedIndex)
         if let items = bar.items, nativeSelectedIndex >= 0, nativeSelectedIndex < items.count {
           bar.selectedItem = items[nativeSelectedIndex]
         }
+        bar.bringCenterActionToFront()
         // Force another update cycle for text rendering
         DispatchQueue.main.async { [weak bar] in
           guard let bar = bar else { return }
           bar.setNeedsDisplay()
           bar.setNeedsLayout()
           bar.layoutIfNeeded()
+          bar.bringCenterActionToFront()
         }
       }
     }
