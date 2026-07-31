@@ -100,6 +100,26 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
   private var centerActionIndex: Int?
   private var centerActionSize: CGFloat = 44
 
+  /// iOS 26.0 ignores `UITabBarItem.isEnabled = false` and can route a center
+  /// tap to the placeholder item even when our interaction button is visually
+  /// above it. Keep the hit target outside the tab bar on that release so the
+  /// tab bar and its private gesture recognizers never receive the touch.
+  private var requiresDetachedCenterActionHitTarget: Bool {
+    if #available(iOS 26.1, *) {
+      return false
+    }
+    if #available(iOS 26.0, *) {
+      return true
+    }
+    return false
+  }
+
+  /// Keep the detached iOS 26.0 target comfortably tappable without covering
+  /// the neighboring tab's Liquid Glass region.
+  private var detachedCenterActionHitTargetSize: CGFloat {
+    return max(centerActionSize + 12, 44)
+  }
+
   // Pending split-constraint activation deferred while view has no width
   // (e.g. backgrounded at init). Resumed on foreground.
   private struct PendingSplitActivation {
@@ -1011,18 +1031,38 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
           interactionButton.addGestureRecognizer(longPress)
 
           centerActionInteractionButton = interactionButton
-          bar.centerActionInteractionButton = interactionButton
-          bar.addSubview(interactionButton)
-          NSLayoutConstraint.activate([
-            interactionButton.centerXAnchor.constraint(equalTo: button.centerXAnchor),
-            interactionButton.topAnchor.constraint(equalTo: bar.topAnchor),
-            interactionButton.bottomAnchor.constraint(equalTo: bar.bottomAnchor),
-            interactionButton.widthAnchor.constraint(
-              equalTo: bar.widthAnchor,
-              multiplier: 1 / CGFloat(max(bar.items?.count ?? 1, 1))
-            ),
-          ])
-          bar.bringSubviewToFront(interactionButton)
+          if requiresDetachedCenterActionHitTarget {
+            // On iOS 26.0 the disabled placeholder can still win hit testing
+            // inside UITabBar. A sibling overlay prevents that system-only
+            // regression without changing the visual button or later systems.
+            button.isAccessibilityElement = false
+            interactionButton.isAccessibilityElement = false
+            container.addSubview(interactionButton)
+            NSLayoutConstraint.activate([
+              interactionButton.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+              interactionButton.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+              interactionButton.widthAnchor.constraint(
+                equalToConstant: detachedCenterActionHitTargetSize
+              ),
+              interactionButton.heightAnchor.constraint(
+                equalToConstant: detachedCenterActionHitTargetSize
+              ),
+            ])
+            container.bringSubviewToFront(interactionButton)
+          } else {
+            bar.centerActionInteractionButton = interactionButton
+            bar.addSubview(interactionButton)
+            NSLayoutConstraint.activate([
+              interactionButton.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+              interactionButton.topAnchor.constraint(equalTo: bar.topAnchor),
+              interactionButton.bottomAnchor.constraint(equalTo: bar.bottomAnchor),
+              interactionButton.widthAnchor.constraint(
+                equalTo: bar.widthAnchor,
+                multiplier: 1 / CGFloat(max(bar.items?.count ?? 1, 1))
+              ),
+            ])
+            bar.bringSubviewToFront(interactionButton)
+          }
         }
       }
       // Force layout update for background and text rendering on iOS < 16
@@ -1251,6 +1291,10 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
           if let rb = args["splitRightAsButton"] as? NSNumber { self.splitRightAsButton = rb.boolValue }
           let selectedIndex = (args["selectedIndex"] as? NSNumber)?.intValue ?? 0
           // Remove existing bars
+          self.centerActionButton?.removeFromSuperview()
+          self.centerActionButton = nil
+          self.centerActionInteractionButton?.removeFromSuperview()
+          self.centerActionInteractionButton = nil
           self.tabBar?.removeFromSuperview(); self.tabBar = nil
           self.tabBarLeft?.removeFromSuperview(); self.tabBarLeft = nil
           self.tabBarRight?.removeFromSuperview(); self.tabBarRight = nil
