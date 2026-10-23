@@ -96,8 +96,8 @@ class CNTabBarCenterAction extends Equatable {
   /// Width and height of the action button.
   final double size;
 
-  /// Vertical offset from the center of the native tab bar's Liquid Glass
-  /// platter on iOS 26+, or from its safe-area center on earlier versions.
+  /// Vertical offset from the native tab bar's safe-area center. Ignored on
+  /// iPad with iOS 26+, where the action follows the Liquid Glass platter.
   final double verticalOffset;
 
   /// Native accessibility label announced for the action.

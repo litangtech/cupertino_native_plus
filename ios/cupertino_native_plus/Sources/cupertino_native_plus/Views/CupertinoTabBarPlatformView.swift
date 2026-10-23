@@ -31,7 +31,6 @@ private final class CupertinoCenterActionTabBar: UITabBar {
   weak var centerActionButton: UIView?
   weak var centerActionInteractionButton: UIView?
   var centerActionCenterYConstraint: NSLayoutConstraint?
-  var centerActionVerticalOffset: CGFloat = 0
 
   override func layoutSubviews() {
     super.layoutSubviews()
@@ -39,11 +38,13 @@ private final class CupertinoCenterActionTabBar: UITabBar {
     bringCenterActionToFront()
   }
 
-  /// On iOS 26 the floating platter is not centered in the safe area: it sits
-  /// near the top of the bar, and its height changes with the window's size
-  /// class (stacked vs. inline labels). Follow the platter itself instead.
+  /// On iPad with iOS 26 the floating platter is not centered in the safe area:
+  /// it sits near the top of the bar, and its height changes with the window's
+  /// size class (stacked vs. inline labels). Follow the platter itself there.
+  /// iPhone keeps the safe-area center plus the caller's vertical offset.
   private func alignCenterActionToPlatter() {
     guard #available(iOS 26.0, *),
+          traitCollection.userInterfaceIdiom == .pad,
           let constraint = centerActionCenterYConstraint,
           let platter = subviews.first(where: {
             NSStringFromClass(type(of: $0)).contains("TabBarPlatterView")
@@ -51,7 +52,6 @@ private final class CupertinoCenterActionTabBar: UITabBar {
           platter.bounds.height > 0
     else { return }
     let constant = platter.frame.midY - safeAreaLayoutGuide.layoutFrame.midY
-      + centerActionVerticalOffset
     if abs(constraint.constant - constant) > 0.5 {
       constraint.constant = constant
     }
@@ -1030,7 +1030,6 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
           constant: centerActionVerticalOffset
         )
         bar.centerActionCenterYConstraint = centerYConstraint
-        bar.centerActionVerticalOffset = centerActionVerticalOffset
         NSLayoutConstraint.activate([
           button.centerXAnchor.constraint(equalTo: bar.centerXAnchor),
           centerYConstraint,
