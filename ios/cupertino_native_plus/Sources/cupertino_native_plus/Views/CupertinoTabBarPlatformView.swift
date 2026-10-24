@@ -42,12 +42,16 @@ private final class CupertinoCenterActionTabBar: UITabBar {
   /// it sits near the top of the bar, and its height changes with the window's
   /// size class (stacked vs. inline labels). Follow the platter itself there.
   /// iPhone keeps the safe-area center plus the caller's vertical offset.
+  /// The private class is `_UITabBarPlatterView` on iOS 26 and
+  /// `_UITabBarItemPlatterView` on iOS 27; its own subviews end in other
+  /// suffixes such as `ContentView`.
   private func alignCenterActionToPlatter() {
     guard #available(iOS 26.0, *),
           traitCollection.userInterfaceIdiom == .pad,
           let constraint = centerActionCenterYConstraint,
           let platter = subviews.first(where: {
-            NSStringFromClass(type(of: $0)).contains("TabBarPlatterView")
+            let name = NSStringFromClass(type(of: $0))
+            return name.contains("TabBar") && name.hasSuffix("PlatterView")
           }),
           platter.bounds.height > 0
     else { return }
