@@ -708,6 +708,7 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
     var centerActionTint: UIColor? = nil
     var centerActionAccessibilityLabel: String? = nil
     var centerActionDisablePressEffects = false
+    var forceCompactLayout = false
 
     var badgeColors: [NSNumber?] = []
     if let dict = args as? [String: Any] {
@@ -763,6 +764,7 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
       if let value = dict["centerActionDisablePressEffects"] as? Bool {
         centerActionDisablePressEffects = value
       }
+      if let value = dict["forceCompactLayout"] as? Bool { forceCompactLayout = value }
       if let ls = dict["labelStyle"] as? [String: Any] { self.labelStyleDict = ls }
       if let als = dict["activeLabelStyle"] as? [String: Any] { self.activeLabelStyleDict = als }
       // content insets controlled by Flutter padding; keep zero here
@@ -779,6 +781,11 @@ class CupertinoTabBarPlatformView: NSObject, FlutterPlatformView, UITabBarDelega
 
     self.centerActionIndex = hasCenterAction ? max(labels.count, symbols.count) / 2 : nil
     container.backgroundColor = .clear
+    // UITabBar switches to the short inline-label layout in regular width;
+    // a compact override keeps the stacked phone layout on iPad.
+    if forceCompactLayout, #available(iOS 17.0, *) {
+      container.traitOverrides.horizontalSizeClass = .compact
+    }
     container.onDidMoveToWindow = { [weak self] in
       guard let self = self else { return }
       print("[CNTabBar] didMoveToWindow window=\(self.container.window == nil ? "nil" : "set") width=\(self.container.bounds.width)")

@@ -166,6 +166,7 @@ class CNTabBar extends StatefulWidget {
     this.searchController,
     this.labelStyle,
     this.activeLabelStyle,
+    this.forceCompactLayout = false,
   })  : assert(items.length >= 2, 'Tab bar must have at least 2 items'),
         assert(
           items.length <= 5,
@@ -222,6 +223,11 @@ class CNTabBar extends StatefulWidget {
 
   /// When true, centers the split groups more tightly.
   final bool shrinkCentered;
+
+  /// When true, the native bar always uses the compact (phone) layout with
+  /// icons stacked above labels, instead of the shorter inline-label layout
+  /// UIKit picks in regular width such as iPad. Requires iOS 17.
+  final bool forceCompactLayout;
 
   /// Gap between left/right halves when split.
   ///
@@ -563,6 +569,7 @@ class _CNTabBarState extends State<CNTabBar> {
       'rightCount': widget.rightCount,
       'splitSpacing': widget.splitSpacing,
       'splitRightAsButton': widget.splitRightAsButton,
+      'forceCompactLayout': widget.forceCompactLayout,
       if (centerAction != null) ...{
         'hasCenterAction': true,
         'centerActionSymbol':
@@ -666,7 +673,8 @@ class _CNTabBarState extends State<CNTabBar> {
         '${widget.items.length}_'
         '${widget.centerAction != null}_'
         '${widget.split}_'
-        '${widget.searchItem != null}',
+        '${widget.searchItem != null}_'
+        '${widget.forceCompactLayout}',
       ),
       viewType: viewType,
       creationParams: creationParams,
